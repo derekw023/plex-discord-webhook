@@ -39,7 +39,7 @@ pub struct Payload {
     pub server: Server,
     #[serde(rename(deserialize = "Player"))]
     pub player: Player,
-    #[serde(rename(deserialize = "Metadata"))]
+    #[serde(rename(deserialize = "Metadata"), flatten)]
     pub metadata: Option<String>,
 }
 
@@ -77,9 +77,9 @@ pub async fn handle_webhook(form: FormData) -> Result<impl warp::Reply, warp::Re
             .await
             .map_err(|_e| warp::reject::reject())?;
 
-        if let Ok(json) = serde_json::from_slice::<Payload>(&value) {
-            println!("{:#?}", json);
-        }
+        let json = serde_json::from_slice::<Payload>(&value)
+            .map_err(|e| println!("Failed to parse payload with {:?}", e));
+        println!("{:#?}", json);
     }
 
     Ok(warp::reply())
