@@ -63,11 +63,13 @@ pub async fn handle_webhook(form: FormData) -> Result<impl warp::Reply, warp::Re
         .await
         .map_err(|_e| warp::reject::reject())?;
 
+    // SPlit parts of multipart form
     for p in parts {
         if p.name() != "payload" {
             println!("Skipping non-payload form part");
         }
 
+        // Fold stream that makes up the body into a vec
         let value = p
             .stream()
             .try_fold(Vec::new(), |mut vec, data| {
@@ -78,7 +80,8 @@ pub async fn handle_webhook(form: FormData) -> Result<impl warp::Reply, warp::Re
             .map_err(|_e| warp::reject::reject())?;
 
         let json = serde_json::from_slice::<Payload>(&value)
-            .map_err(|e| println!("Failed to parse payload with {:?}", e));
+            .map_err(|e| println!("Failed to parse payload with {:?}", e))
+            .unwrap();
         println!("{:#?}", json);
     }
 
