@@ -2,7 +2,10 @@ use color_eyre::Report;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-mod plex_webhook;
+mod plex;
+
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use warp::Filter;
 const MAX_LENGTH: u64 = 1024 * 1024;
@@ -13,12 +16,15 @@ async fn main() -> Result<(), Report> {
 
     let port: u16 = 8000;
 
+    let plex_handler = Arc::new(Mutex::new(plex::webhook::PlexHandler::new()));
+
     let api = warp::path("plex")
         .and(warp::post())
+        .map(move || plex_handler.clone())
         .and(warp::filters::multipart::form().max_length(MAX_LENGTH))
-        .and_then(plex_webhook::handle_webhook);
+        .and_then(plex::webhook::handle_webhook);
 
-    let server_future = warp::serve(api).run(([127, 0, 0, 1], port));
+    let server_future = warp::serve(api).run(([0, 0, 0, 0], port));
 
     info!("Starting up plex webhook handler");
     server_future.await;
