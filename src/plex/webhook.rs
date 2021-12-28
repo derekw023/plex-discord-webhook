@@ -2,7 +2,7 @@ use std::io::Write;
 
 use bytes::BufMut;
 use futures::TryStreamExt;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use warp::multipart::{FormData, Part};
 
 use std::sync::Arc;
