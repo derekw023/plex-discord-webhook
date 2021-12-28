@@ -1,89 +1,43 @@
-use bytes::BufMut;
-use futures::TryStreamExt;
-use serde::{Deserialize, Serialize};
-use warp::multipart::{FormData, Part};
-use warp::Filter;
+use color_eyre::Report;
+use tracing::info;
+use tracing_subscriber::EnvFilter;
 
+mod plex_webhook;
+
+use warp::Filter;
 const MAX_LENGTH: u64 = 1024 * 1024;
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Account {
-    pub id: u64,
-    pub thumb: String,
-    pub title: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Server {
-    pub title: String,
-    pub uuid: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Player {
-    pub local: bool,
-    pub public_address: String,
-    pub title: String,
-    pub uuid: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Payload {
-    pub event: String,
-    pub user: bool,
-    pub owner: bool,
-    #[serde(rename(deserialize = "Account"))]
-    pub account: Account,
-    #[serde(rename(deserialize = "Server"))]
-    pub server: Server,
-    #[serde(rename(deserialize = "Player"))]
-    pub player: Player,
-    #[serde(rename(deserialize = "Metadata"), flatten)]
-    pub metadata: Option<String>,
-}
-
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Report> {
+    setup()?;
+
     let port: u16 = 8000;
 
     let api = warp::path("plex")
         .and(warp::post())
         .and(warp::filters::multipart::form().max_length(MAX_LENGTH))
-        .and_then(handle_webhook);
+        .and_then(plex_webhook::handle_webhook);
 
-    let server_future = warp::serve(api).run(([127, 0, 0, 1], port.clone()));
+    let server_future = warp::serve(api).run(([127, 0, 0, 1], port));
 
+    info!("Starting up plex webhook handler");
     server_future.await;
+
+    Ok(())
 }
 
-pub async fn handle_webhook(form: FormData) -> Result<impl warp::Reply, warp::Rejection> {
-    let parts: Vec<Part> = form
-        .try_collect()
-        .await
-        .map_err(|_e| warp::reject::reject())?;
-
-    // SPlit parts of multipart form
-    for p in parts {
-        if p.name() != "payload" {
-            println!("Skipping non-payload form part");
-        }
-
-        // Fold stream that makes up the body into a vec
-        let value = p
-            .stream()
-            .try_fold(Vec::new(), |mut vec, data| {
-                vec.put(data);
-                async move { Ok(vec) }
-            })
-            .await
-            .map_err(|_e| warp::reject::reject())?;
-
-        let json = serde_json::from_slice::<Payload>(&value)
-            .map_err(|e| println!("Failed to parse payload with {:?}", e))
-            .unwrap();
-        println!("{:#?}", json);
+fn setup() -> Result<(), Report> {
+    if std::env::var("RUST_LIB_BACKTRACE").is_err() {
+        std::env::set_var("RUST_LIB_BACKTRACE", "1")
     }
+    color_eyre::install()?;
 
-    Ok(warp::reply())
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info")
+    }
+    tracing_subscriber::fmt::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
+    Ok(())
 }
