@@ -54,11 +54,11 @@ pub enum Event {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Credit {
-    filter: String,
-    id: u32,
-    tag: String,
-    role: Option<String>,
-    thumb: Option<String>,
+    pub filter: String,
+    pub id: u32,
+    pub tag: String,
+    pub role: Option<String>,
+    pub thumb: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -72,66 +72,68 @@ pub struct Link {
 #[serde(rename_all = "camelCase")]
 pub struct Metadata {
     // Child info (directly describing this item)
-    title: Option<String>,
-    title_sort: Option<String>,
-    thumb: Option<String>,
-    key: Option<String>,
-    guid: Option<String>,
-    rating_key: Option<String>,
-    summary: Option<String>,
+    pub title: Option<String>,
+    pub title_sort: Option<String>,
+    pub thumb: Option<String>,
+    pub key: Option<String>,
+    pub guid: Option<String>,
+    pub rating_key: Option<String>,
+    pub summary: Option<String>,
     #[serde(rename = "Guid")]
-    external_links: Option<Vec<Link>>,
+    pub external_links: Option<Vec<Link>>,
     #[serde(rename = "type")]
-    media_type: Option<String>,
+    pub media_type: Option<String>,
 
     // Miscellaneous extra info
-    index: Option<u64>,
-    art: Option<String>,
-    skip_count: Option<u64>,
-    view_count: Option<u64>,
-    audience_rating: Option<f32>,
-    audience_rating_image: Option<String>,
-    library_section_type: Option<String>,
-    content_rating: Option<String>,
-    view_offset: Option<u64>,
+    pub index: Option<u64>,
+    pub art: Option<String>,
+    pub skip_count: Option<u64>,
+    pub view_count: Option<u64>,
+    pub audience_rating: Option<f32>,
+    pub audience_rating_image: Option<String>,
+    pub library_section_type: Option<String>,
+    pub content_rating: Option<String>,
+    pub view_offset: Option<u64>,
 
     // Credits info
     #[serde(rename = "Writer")]
-    writer: Option<Vec<Credit>>,
+    pub writer: Option<Vec<Credit>>,
     #[serde(rename = "Director")]
-    director: Option<Vec<Credit>>,
+    pub director: Option<Vec<Credit>>,
     #[serde(rename = "Role")]
-    role: Option<Vec<Credit>>,
+    pub role: Option<Vec<Credit>>,
+    #[serde(rename = "Producer")]
+    pub producer: Option<Vec<Credit>>,
 
     // Times, I think. Not sure exactly what format these timestamps are in
-    originally_available_at: Option<String>,
-    updated_at: Option<u64>,
-    last_viewed_at: Option<u64>,
-    duration: Option<u64>,
-    added_at: Option<u64>,
+    pub originally_available_at: Option<String>,
+    pub updated_at: Option<u64>,
+    pub last_viewed_at: Option<u64>,
+    pub duration: Option<u64>,
+    pub added_at: Option<u64>,
 
     // Parent info (if present)
-    parent_rating_key: Option<String>,
-    parent_index: Option<u64>,
-    parent_key: Option<String>,
-    parent_title: Option<String>,
-    parent_guid: Option<String>,
-    parent_thumb: Option<String>,
+    pub parent_rating_key: Option<String>,
+    pub parent_index: Option<u64>,
+    pub parent_key: Option<String>,
+    pub parent_title: Option<String>,
+    pub parent_guid: Option<String>,
+    pub parent_thumb: Option<String>,
 
     // Grandparent info (if present)
-    grandparent_key: Option<String>,
-    grandparent_title: Option<String>,
-    grandparent_thumb: Option<String>,
-    grandparent_theme: Option<String>,
-    grandparent_guid: Option<String>,
-    grandparent_rating_key: Option<String>,
-    grandparent_art: Option<String>,
+    pub grandparent_key: Option<String>,
+    pub grandparent_title: Option<String>,
+    pub grandparent_thumb: Option<String>,
+    pub grandparent_theme: Option<String>,
+    pub grandparent_guid: Option<String>,
+    pub grandparent_rating_key: Option<String>,
+    pub grandparent_art: Option<String>,
 
     // Containing library info
-    library_section_title: Option<String>,
-    library_section_key: Option<String>,
+    pub library_section_title: Option<String>,
+    pub library_section_key: Option<String>,
     #[serde(rename = "librarySectionID")]
-    library_section_id: u32,
+    pub library_section_id: u32,
 
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
@@ -147,7 +149,7 @@ pub struct Payload {
     #[serde(rename(deserialize = "Server"))]
     pub server: Server,
     #[serde(rename(deserialize = "Player"))]
-    pub player: Player,
+    pub player: Option<Player>,
     #[serde(rename(deserialize = "Metadata"))]
     pub metadata: Option<Metadata>,
 }
