@@ -1,10 +1,10 @@
-use std::io::Write;
-
 use bytes::BufMut;
 use futures::TryStreamExt;
-use tracing::{error, info};
+use std::io::Write;
+use tracing::{debug, error, info, warn};
 use warp::multipart::{FormData, Part};
 
+use futures::TryFuture;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -20,10 +20,15 @@ impl PlexHandler {
     }
 }
 
+pub struct PlexWebhookRequest {
+    pub payload: Payload,
+    pub thumb: Option<Vec<u8>>,
+}
+
 pub async fn handle_webhook(
     ctx: Arc<Mutex<PlexHandler>>,
     form: FormData,
-) -> Result<impl warp::Reply, warp::Rejection> {
+) -> Result<PlexWebhookRequest, warp::Rejection> {
     let parts: Vec<Part> = form
         .try_collect()
         .await
@@ -31,15 +36,16 @@ pub async fn handle_webhook(
 
     let mut payload = None;
     let mut thumbs = None;
-    {
+    let reqcount = {
         let mut c = ctx.lock().await;
         c.req_count += 1;
-    }
+        c.req_count
+    };
     // Split parts of multipart form
     for p in parts {
         match p.name() {
             "payload" => {
-                // Fold stream that makes up the body into a vec
+                // Fold stream that makes up the body into a vec for deserialization
                 let value = p
                     .stream()
                     .try_fold(Vec::new(), |mut vec, data| {
@@ -49,13 +55,20 @@ pub async fn handle_webhook(
                     .await
                     .map_err(|_e| warp::reject::reject())?;
 
-                // Sometimes plex messes up and passes us an image with the payload title
-                // Attempt parsing as JSON, else assume the buffer is an image
-                // TODO: Find some way to validate it is JPEG data
+                // Parse payload using models and serde_json
                 let payload_part = serde_json::from_slice::<Payload>(&value).map_err(|e| {
                     error!("Failed to parse request payload with {}", e);
                     warp::reject()
                 })?;
+
+                // Warn if metadata parsing is wrong, necessary since the format may change and was gleaned from reverse-engineering in the first place
+                if let Some(metadata) = payload_part.metadata.as_ref() {
+                    if !metadata.extra.is_empty() {
+                        warn!("{} extra fields in metadata", metadata.extra.len());
+                        debug!("Extra metadata fields: {:#?}", metadata.extra);
+                    }
+                }
+
                 payload = Some(payload_part);
             }
             "thumb" => {
@@ -76,18 +89,31 @@ pub async fn handle_webhook(
     }
 
     if let Some(p) = payload {
-        let c = ctx.lock().await;
         info!(
             "Got request #{}, user {}, event {:?}",
-            c.req_count, p.account.title, p.event
+            reqcount, p.account.title, p.event
         );
-    }
 
-    //TODO: send thumbnails to the right place
-    if let Some(t) = thumbs {
-        let mut f = std::fs::File::create("thumb.jpeg").unwrap();
-        f.write_all(&t).unwrap();
-    }
+        let f = std::fs::File::create(format!("logs/req{}.json", reqcount)).unwrap();
 
-    Ok(warp::reply())
+        serde_json::to_writer(f, &p).unwrap();
+
+        if let Some(t) = thumbs {
+            let mut f = std::fs::File::create(format!("logs/thumb{}.jpeg", reqcount)).unwrap();
+            f.write_all(&t).unwrap();
+
+            Ok(PlexWebhookRequest {
+                payload: p,
+                thumb: Some(t),
+            })
+        } else {
+            Ok(PlexWebhookRequest {
+                payload: p,
+                thumb: None,
+            })
+        }
+    } else {
+        //TODO: reply with proper error code
+        Err(warp::reject())
+    }
 }
