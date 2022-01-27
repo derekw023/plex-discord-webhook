@@ -128,7 +128,20 @@ pub struct WebhookRequest {
     pub username: Option<String>,
     pub avatar_url: Option<String>,
     pub tts: Option<bool>,
-    pub embeds: Option<Vec<Embed>>,
-    pub allowed_mentions: Option<AllowedMention>,
+    embeds: Option<Vec<Embed>>,
+    allowed_mentions: Option<AllowedMention>,
     // Other fields are available per API docs, but are not implemented as for the most part they don't apply to webhooks or this use case
+}
+
+impl WebhookRequest {
+    pub fn new() -> Self {
+        Self {
+            content: Some("Hello Discord".into()),
+            username: None,
+            avatar_url: None,
+            tts: None,
+            embeds: None,
+            allowed_mentions: None,
+        }
+    }
 }

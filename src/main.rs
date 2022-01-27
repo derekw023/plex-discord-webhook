@@ -18,11 +18,11 @@ async fn main() -> Result<(), Report> {
     setup()?;
 
     let port: u16 = 8001;
-    let webhook_url: String = "DUMMY".to_string();
+    let webhook_url: String = "wouldn't you like to know".to_string();
 
     let plex_handler = Arc::new(Mutex::new(plex::webhook::PlexHandler::new()));
 
-    let discord_client = Arc::new(discord::webhook::WebhookExecutor::new(webhook_url));
+    let discord_client = discord::webhook::WebhookExecutor::new(webhook_url);
 
     let api = warp::path("plex")
         .and(warp::post())
@@ -31,19 +31,21 @@ async fn main() -> Result<(), Report> {
         .and_then(plex::webhook::handle_webhook)
         .map(move |msg| (msg, discord_client.clone()))
         .then(
-            |arg: (PlexWebhookRequest, Arc<discord::webhook::WebhookExecutor>)| async move {
+            |arg: (PlexWebhookRequest, discord::webhook::WebhookExecutor)| async move {
                 let msg = arg.0;
                 let client = arg.1;
 
-                let message = format!(
+                let _message = format!(
                     "User {} {:?}'ed {}",
                     msg.payload.account.title,
                     msg.payload.event,
                     msg.payload.metadata.unwrap().title.unwrap()
                 );
 
-                let content = discord::webhook::WebhookRequest { content: message };
-                client.clone().execute_webhook(content).await
+                let content = discord::webhook::WebhookRequest::new();
+                client.clone().execute_webhook(content).await;
+
+                warp::reply()
             },
         );
 
@@ -64,7 +66,7 @@ fn setup() -> Result<(), Report> {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var(
             "RUST_LOG",
-            "plex_discord_webhook=info,plex_discord_webhook::plex=debug",
+            "plex_discord_webhook=info,plex_discord_webhook::plex::webhook=debug",
         )
     }
     tracing_subscriber::fmt::fmt()
