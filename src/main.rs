@@ -13,25 +13,47 @@ const MAX_LENGTH: u64 = 1024 * 1024;
 
 use plex::webhook::PlexWebhookRequest;
 
+use clap::Parser;
+
+#[derive(Parser)]
+struct Config {
+    /// Webhook URL to post to, may be specified multiple times
+    #[clap(short)]
+    webhook_urls: Vec<String>,
+
+    /// Port to listen on, default 8001
+    #[clap(default_value = "8001")]
+    port: u16,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Report> {
     setup()?;
 
-    let port: u16 = 8001;
-    let webhook_url: String = "wouldn't you like to know".to_string();
+    let args = Config::parse();
 
     let plex_handler = Arc::new(Mutex::new(plex::webhook::PlexHandler::new()));
 
-    let discord_client = discord::webhook::WebhookExecutor::new(webhook_url);
+    // Start with an empty base client
+    let discord_client_base = discord::webhook::WebhookExecutor::new("".into());
+
+    // Clone it for all subsequent clients
+    let discord_clients: Vec<discord::webhook::WebhookExecutor> = args
+        .webhook_urls
+        .iter()
+        .map(|u| discord_client_base.clone_with_url(u.into()))
+        .collect();
+
+    drop(discord_client_base);
 
     let api = warp::path("plex")
         .and(warp::post())
         .map(move || plex_handler.clone())
         .and(warp::filters::multipart::form().max_length(MAX_LENGTH))
         .and_then(plex::webhook::handle_webhook)
-        .map(move |msg| (msg, discord_client.clone()))
+        .map(move |msg| (msg, discord_clients.clone()))
         .then(
-            |arg: (PlexWebhookRequest, discord::webhook::WebhookExecutor)| async move {
+            |arg: (PlexWebhookRequest, Vec<discord::webhook::WebhookExecutor>)| async move {
                 let msg = arg.0;
                 let client = arg.1;
 
@@ -43,13 +65,15 @@ async fn main() -> Result<(), Report> {
                 );
 
                 let content = discord::webhook::WebhookRequest::new();
-                client.clone().execute_webhook(content).await;
+                client.iter().map(|c| async {
+                    c.execute_webhook(&content).await;
+                });
 
                 warp::reply()
             },
         );
 
-    let server_future = warp::serve(api).run(([0, 0, 0, 0], port));
+    let server_future = warp::serve(api).run(([0, 0, 0, 0], args.port));
 
     info!("Starting up plex webhook handler");
     server_future.await;

@@ -22,8 +22,14 @@ impl WebhookExecutor {
         Self { client, url }
     }
 
-    pub async fn execute_webhook(&self, request: WebhookRequest) -> impl warp::Reply {
-        let body = Body::from(serde_json::to_string(&request).unwrap());
+    pub fn clone_with_url(self, url: String) -> Self {
+        let client = self.client;
+
+        Self { client, url }
+    }
+
+    pub async fn execute_webhook(&self, request: &WebhookRequest) -> impl warp::Reply {
+        let body = Body::from(serde_json::to_string(request).unwrap());
 
         let req = Request::post(self.url.clone())
             .header("Content-Type", "application/json")
