@@ -7,25 +7,29 @@ use serde::Serialize;
 
 use tracing::{debug, error};
 
+/// At this point just a wrapper around an HTTP client
 #[derive(Debug, Clone)]
 pub struct WebhookExecutor {
-    /// Only support https transport, as this is all that discord will support
+    /// Only support https transport, as the discord API is HTTPS only
     client: Client<HttpsConnector<HttpConnector>>,
 }
 
 impl WebhookExecutor {
-    /// This initializes a new HTTP Client, should be cloned by [clone_with_url] to set the URL, before using
+    /// This initializes a new HTTP Client, can be cloned very cheaply for sharing the underlying client's connection pool
     pub fn new() -> Self {
-        let client = Client::builder().build(HttpsConnector::new());
-
-        Self { client }
+        Self {
+            client: Client::builder().build(HttpsConnector::new()),
+        }
     }
 
-    pub async fn execute_webhook(
-        &self,
-        url: &String,
-        request: &WebhookRequest,
-    ) -> impl warp::Reply {
+    /// Execute the given request against the passed webhook URL
+    ///
+    /// # Arguments
+    ///
+    ///  * `url` - Webhook URL acquired from a Discord server's API or admin interface
+    ///
+    ///  * `request` - A message to post to the specified channel, must be constructed elsewhere
+    pub async fn execute_webhook(&self, url: &str, request: &WebhookRequest) -> impl warp::Reply {
         let body = Body::from(serde_json::to_string(request).unwrap());
 
         let req = Request::post(url)

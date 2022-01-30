@@ -1,20 +1,18 @@
 use bytes::BufMut;
 use futures::TryStreamExt;
-use std::io::Write;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 use warp::multipart::{FormData, Part};
-
-use futures::TryFuture;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 use super::models::Payload;
 
+/// A webhook request from a Plex server is comprised of two parts, a [Payload] and an optional thumbnail
+/// for certain events. The thumbnail is JPEG encoded, stored here in a [Vec].
 pub struct PlexWebhookRequest {
     pub payload: Payload,
     pub thumb: Option<Vec<u8>>,
 }
 
+/// Given a multipart form submitted by a plex server, attempt to parse as a plex webhook message
 pub async fn handle_webhook(form: FormData) -> Result<PlexWebhookRequest, warp::Rejection> {
     let parts: Vec<Part> = form
         .try_collect()
@@ -54,6 +52,7 @@ pub async fn handle_webhook(form: FormData) -> Result<PlexWebhookRequest, warp::
                 payload = Some(payload_part);
             }
             "thumb" => {
+                // Take the thumbnail and just shove it into a byte vector, dependent code may use it or not
                 let value = p
                     .stream()
                     .try_fold(Vec::new(), |mut vec, data| {
@@ -65,25 +64,13 @@ pub async fn handle_webhook(form: FormData) -> Result<PlexWebhookRequest, warp::
                 thumbs = Some(value);
             }
             s => {
-                println!("unexpected pattern {}", s);
+                warn!("Discarding unexpected form field {s}")
             }
         }
     }
 
     if let Some(p) = payload {
-        info!(
-            "Got request #{}, user {}, event {:?}",
-            reqcount, p.account.title, p.event
-        );
-
-        let f = std::fs::File::create(format!("logs/req{}.json", reqcount)).unwrap();
-
-        serde_json::to_writer(f, &p).unwrap();
-
         if let Some(t) = thumbs {
-            let mut f = std::fs::File::create(format!("logs/thumb{}.jpeg", reqcount)).unwrap();
-            f.write_all(&t).unwrap();
-
             Ok(PlexWebhookRequest {
                 payload: p,
                 thumb: Some(t),
