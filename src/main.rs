@@ -32,30 +32,27 @@ async fn main() -> Result<(), Report> {
 
     let args = Config::parse();
 
-    let plex_handler = Arc::new(Mutex::new(plex::webhook::PlexHandler::new()));
+    // Internally this uses an Arc<Mutex<T>>, so cloning directly is cheap and safe
+    let discord_client = discord::webhook::WebhookExecutor::new();
 
-    // Start with an empty base client
-    let discord_client_base = discord::webhook::WebhookExecutor::new("".into());
-
-    // Clone it for all subsequent clients
-    let discord_clients: Vec<discord::webhook::WebhookExecutor> = args
-        .webhook_urls
-        .iter()
-        .map(|u| discord_client_base.clone_with_url(u.into()))
-        .collect();
-
-    drop(discord_client_base);
+    // Arc to avoid copying webhook strings
+    let webhook_urls = Arc::new(args.webhook_urls);
 
     let api = warp::path("plex")
         .and(warp::post())
-        .map(move || plex_handler.clone())
         .and(warp::filters::multipart::form().max_length(MAX_LENGTH))
         .and_then(plex::webhook::handle_webhook)
-        .map(move |msg| (msg, discord_clients.clone()))
+        // Clone ARCs for state structures
+        .map(move |msg| (msg, discord_client.clone(), webhook_urls.clone()))
         .then(
-            |arg: (PlexWebhookRequest, Vec<discord::webhook::WebhookExecutor>)| async move {
+            |arg: (
+                PlexWebhookRequest,
+                discord::webhook::WebhookExecutor,
+                Arc<Vec<String>>,
+            )| async {
                 let msg = arg.0;
                 let client = arg.1;
+                let urls = arg.2;
 
                 let _message = format!(
                     "User {} {:?}'ed {}",
@@ -65,10 +62,9 @@ async fn main() -> Result<(), Report> {
                 );
 
                 let content = discord::webhook::WebhookRequest::new();
-                client.iter().map(|c| async {
-                    c.execute_webhook(&content).await;
-                });
-
+                for url in urls.iter() {
+                    client.execute_webhook(url, &content).await;
+                }
                 warp::reply()
             },
         );

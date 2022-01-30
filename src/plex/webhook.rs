@@ -10,25 +10,12 @@ use tokio::sync::Mutex;
 
 use super::models::Payload;
 
-pub struct PlexHandler {
-    pub req_count: u32,
-}
-
-impl PlexHandler {
-    pub fn new() -> Self {
-        Self { req_count: 0 }
-    }
-}
-
 pub struct PlexWebhookRequest {
     pub payload: Payload,
     pub thumb: Option<Vec<u8>>,
 }
 
-pub async fn handle_webhook(
-    ctx: Arc<Mutex<PlexHandler>>,
-    form: FormData,
-) -> Result<PlexWebhookRequest, warp::Rejection> {
+pub async fn handle_webhook(form: FormData) -> Result<PlexWebhookRequest, warp::Rejection> {
     let parts: Vec<Part> = form
         .try_collect()
         .await
@@ -36,11 +23,6 @@ pub async fn handle_webhook(
 
     let mut payload = None;
     let mut thumbs = None;
-    let reqcount = {
-        let mut c = ctx.lock().await;
-        c.req_count += 1;
-        c.req_count
-    };
     // Split parts of multipart form
     for p in parts {
         match p.name() {

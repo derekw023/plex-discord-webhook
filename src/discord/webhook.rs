@@ -11,27 +11,24 @@ use tracing::{debug, error};
 pub struct WebhookExecutor {
     /// Only support https transport, as this is all that discord will support
     client: Client<HttpsConnector<HttpConnector>>,
-    /// webhook URL from discord
-    url: String,
 }
 
 impl WebhookExecutor {
-    pub fn new(url: String) -> Self {
+    /// This initializes a new HTTP Client, should be cloned by [clone_with_url] to set the URL, before using
+    pub fn new() -> Self {
         let client = Client::builder().build(HttpsConnector::new());
 
-        Self { client, url }
+        Self { client }
     }
 
-    pub fn clone_with_url(self, url: String) -> Self {
-        let client = self.client;
-
-        Self { client, url }
-    }
-
-    pub async fn execute_webhook(&self, request: &WebhookRequest) -> impl warp::Reply {
+    pub async fn execute_webhook(
+        &self,
+        url: &String,
+        request: &WebhookRequest,
+    ) -> impl warp::Reply {
         let body = Body::from(serde_json::to_string(request).unwrap());
 
-        let req = Request::post(self.url.clone())
+        let req = Request::post(url)
             .header("Content-Type", "application/json")
             .body(body)
             .unwrap();
