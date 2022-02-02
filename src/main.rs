@@ -6,7 +6,6 @@ mod discord;
 mod plex;
 
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 use warp::Filter;
 const MAX_LENGTH: u64 = 1024 * 1024;
@@ -54,16 +53,18 @@ async fn main() -> Result<(), Report> {
                 let client = arg.1;
                 let urls = arg.2;
 
-                let _message = format!(
+                let message = discord::webhook::WebhookRequest::Content(format!(
                     "User {} {:?}'ed {}",
                     msg.payload.account.title,
                     msg.payload.event,
                     msg.payload.metadata.unwrap().title.unwrap()
-                );
+                ));
 
-                let content = discord::webhook::WebhookRequest::new();
                 for url in urls.iter() {
-                    client.execute_webhook(url, &content).await;
+                    let ret = message.execute(client.clone(), url).await;
+                    if ret.is_err() {
+                        error!("Request failed because: {ret:?}");
+                    }
                 }
                 warp::reply()
             },
@@ -86,7 +87,7 @@ fn setup() -> Result<(), Report> {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var(
             "RUST_LOG",
-            "plex_discord_webhook=info,plex_discord_webhook::plex::webhook=debug",
+            "plex_discord_webhook=info,plex_discord_webhook::plex::webhook=info",
         )
     }
     tracing_subscriber::fmt::fmt()

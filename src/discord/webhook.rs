@@ -5,6 +5,7 @@ use warp::hyper::http;
 
 use serde::Serialize;
 
+use color_eyre::{eyre::eyre, Result};
 use tracing::{debug, error};
 
 /// At this point just a wrapper around an HTTP client
@@ -20,38 +21,6 @@ impl WebhookExecutor {
         Self {
             client: Client::builder().build(HttpsConnector::new()),
         }
-    }
-
-    /// Execute the given request against the passed webhook URL
-    ///
-    /// # Arguments
-    ///
-    ///  * `url` - Webhook URL acquired from a Discord server's API or admin interface
-    ///
-    ///  * `request` - A message to post to the specified channel, must be constructed elsewhere
-    pub async fn execute_webhook(&self, url: &str, request: &WebhookRequest) -> impl warp::Reply {
-        let body = Body::from(serde_json::to_string(request).unwrap());
-
-        let req = Request::post(url)
-            .header("Content-Type", "application/json")
-            .body(body)
-            .unwrap();
-
-        debug!("{:?}", req);
-
-        let mut resp = self.client.request(req).await.unwrap();
-
-        debug!("Discord webhook reply status: {}", resp.status());
-
-        // This is expected to be status 204, no content. If there is content format and log it
-        if !http::StatusCode::is_success(&resp.status()) {
-            let body_bytes = to_bytes(resp.body_mut()).await.unwrap();
-            let body_str = std::string::String::from_utf8_lossy(&body_bytes);
-
-            error!("Server replied with {}", body_str);
-        }
-
-        warp::reply()
     }
 }
 
@@ -129,26 +98,49 @@ struct AllowedMention {
     replied_user: bool,
 }
 
-#[derive(Debug, Serialize)]
-pub struct WebhookRequest {
-    pub content: Option<String>,
-    pub username: Option<String>,
-    pub avatar_url: Option<String>,
-    pub tts: Option<bool>,
-    embeds: Option<Vec<Embed>>,
+/// May be constructed to specify optional flags that can be sent alongside the main request
+#[derive(Serialize, Debug)]
+pub struct RequestMetadata {
+    username: Option<String>,
+    avatar_url: Option<String>,
+    tts: Option<bool>,
     allowed_mentions: Option<AllowedMention>,
-    // Other fields are available per API docs, but are not implemented as for the most part they don't apply to webhooks or this use case
+}
+
+/// May be constructed as a plain text message or a rich embed struct
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WebhookRequest {
+    Content(String),
+    Embeds(Vec<Embed>),
 }
 
 impl WebhookRequest {
     pub fn new() -> Self {
-        Self {
-            content: Some("Hello Discord".into()),
-            username: None,
-            avatar_url: None,
-            tts: None,
-            embeds: None,
-            allowed_mentions: None,
+        Self::Content("Hello Discord".into())
+    }
+
+    pub async fn execute(&self, client: WebhookExecutor, url: &str) -> Result<()> {
+        let body = Body::from(serde_json::to_string(self).unwrap());
+
+        let req = Request::post(url)
+            .header("Content-Type", "application/json")
+            .body(body)?;
+
+        debug!("{:?}", req);
+
+        let mut resp = client.client.request(req).await?;
+
+        debug!("Discord webhook reply status: {}", resp.status());
+
+        // This is expected to be status 204, no content. If there is content format and log it
+        if !http::StatusCode::is_success(&resp.status()) {
+            let body_bytes = to_bytes(resp.body_mut()).await?;
+            let body_str = std::string::String::from_utf8_lossy(&body_bytes);
+
+            Err(eyre!("Server replied with {}", body_str))
+        } else {
+            Ok(())
         }
     }
 }
