@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-warp = "0.3"
+warp = "0.3.2"
 hyper-tls = "*"
 bytes = "1"
 
@@ -17,4 +17,9 @@ serde_json = { version = "1" }
 tracing = "0.1.29"
 tracing-subscriber = { version = "0.3.4", features = ["env-filter"] }
 color-eyre = "0.5.11"
-clap = { version = "3.0.13", features = ["env", "derive", "unicode", "wrap_help"] }
+clap = { version = "3.0.13", features = [
+    "env",
+    "derive",
+    "unicode",
+    "wrap_help",
+] }

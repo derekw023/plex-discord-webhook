@@ -24,27 +24,39 @@ impl WebhookExecutor {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct Embed {
-    title: Option<String>,
+#[derive(Debug, Serialize, Default)]
+pub struct Embed {
+    pub title: Option<String>,
     /// Type should always be rich for webhooks, and in general
     #[serde(rename = "type")]
-    kind: Option<String>,
-    description: Option<String>,
-    url: Option<String>,
-    timestamp: Option<String>,
-    color: Option<u32>,
-    footer: Option<EmbedFooter>,
-    image: Option<EmbedMedia>,
-    thumbnail: Option<EmbedMedia>,
-    video: Option<EmbedMedia>,
-    provider: Option<EmbedProvider>,
-    author: Option<EmbedAuthor>,
-    fields: Option<Vec<EmbedField>>,
+    kind: EmbedKind,
+    pub description: Option<String>,
+    pub url: Option<String>,
+    pub timestamp: Option<String>,
+    pub color: Option<u32>,
+    pub footer: Option<EmbedFooter>,
+    pub image: Option<EmbedMedia>,
+    pub thumbnail: Option<EmbedMedia>,
+    pub video: Option<EmbedMedia>,
+    pub provider: Option<EmbedProvider>,
+    pub author: Option<EmbedAuthor>,
+    pub fields: Option<Vec<EmbedField>>,
 }
 
 #[derive(Debug, Serialize)]
-struct EmbedFooter {
+enum EmbedKind {
+    #[serde(rename = "rich")]
+    Rich,
+}
+
+impl Default for EmbedKind {
+    fn default() -> Self {
+        Self::Rich
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct EmbedFooter {
     test: String,
     /// HTTPS link to an icon image
     icon_url: Option<String>,
@@ -53,7 +65,7 @@ struct EmbedFooter {
 }
 
 #[derive(Debug, Serialize)]
-struct EmbedMedia {
+pub struct EmbedMedia {
     url: String,
 
     proxy_url: Option<String>,
@@ -62,13 +74,13 @@ struct EmbedMedia {
 }
 
 #[derive(Debug, Serialize)]
-struct EmbedProvider {
+pub struct EmbedProvider {
     name: String,
     url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
-struct EmbedAuthor {
+pub struct EmbedAuthor {
     name: String,
     url: Option<String>,
     icon_url: Option<String>,
@@ -76,7 +88,7 @@ struct EmbedAuthor {
 }
 
 #[derive(Debug, Serialize)]
-struct EmbedField {
+pub struct EmbedField {
     name: String,
     value: String,
     inline: Option<bool>,
