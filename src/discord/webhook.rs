@@ -6,7 +6,7 @@ use warp::hyper::http;
 use serde::Serialize;
 
 use color_eyre::{eyre::eyre, Result};
-use tracing::{debug, error};
+use tracing::debug;
 
 /// At this point just a wrapper around an HTTP client
 #[derive(Debug, Clone)]
@@ -24,7 +24,7 @@ impl WebhookExecutor {
     }
 }
 
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Serialize, Default, Clone)]
 pub struct Embed {
     pub title: Option<String>,
     /// Type should always be rich for webhooks, and in general
@@ -43,7 +43,7 @@ pub struct Embed {
     pub fields: Option<Vec<EmbedField>>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone, Copy)]
 enum EmbedKind {
     #[serde(rename = "rich")]
     Rich,
@@ -55,16 +55,16 @@ impl Default for EmbedKind {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct EmbedFooter {
-    test: String,
+    pub text: String,
     /// HTTPS link to an icon image
-    icon_url: Option<String>,
+    pub icon_url: Option<String>,
     /// Proxied URL to the icon (not sure what this is for)
-    proxy_icon_url: Option<String>,
+    pub proxy_icon_url: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct EmbedMedia {
     url: String,
 
@@ -73,21 +73,21 @@ pub struct EmbedMedia {
     width: Option<u32>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct EmbedProvider {
     name: String,
     url: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct EmbedAuthor {
-    name: String,
-    url: Option<String>,
-    icon_url: Option<String>,
-    proxy_icon_url: Option<String>,
+    pub name: String,
+    pub url: Option<String>,
+    pub icon_url: Option<String>,
+    pub proxy_icon_url: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct EmbedField {
     name: String,
     value: String,
@@ -96,6 +96,7 @@ pub struct EmbedField {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
+#[allow(dead_code)]
 enum AllowedMentionType {
     Roles,
     Users,
@@ -122,16 +123,13 @@ pub struct RequestMetadata {
 /// May be constructed as a plain text message or a rich embed struct
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
+#[allow(dead_code)]
 pub enum WebhookRequest {
     Content(String),
     Embeds(Vec<Embed>),
 }
 
 impl WebhookRequest {
-    pub fn new() -> Self {
-        Self::Content("Hello Discord".into())
-    }
-
     pub async fn execute(&self, client: WebhookExecutor, url: &str) -> Result<()> {
         let body = Body::from(serde_json::to_string(self).unwrap());
 
