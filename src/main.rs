@@ -6,9 +6,10 @@ use tracing_subscriber::EnvFilter;
 
 use chrono::prelude::*;
 use futures::future::join_all;
-use std::fs;
 use std::io::Write;
 use std::path;
+use std::time::{Duration, SystemTime};
+use std::{collections::HashMap, fs};
 
 mod discord;
 mod plex;
@@ -20,9 +21,9 @@ use plex::webhook::PlexWebhookRequest;
 
 use clap::Parser;
 
-use crate::discord::webhook::{Embed, EmbedAuthor, EmbedFooter};
+use crate::discord::webhook::{Embed, EmbedAuthor, EmbedFooter, WebhookExecutor};
 
-#[derive(Parser)]
+#[derive(Parser, Clone)]
 struct Config {
     /// Webhook URL to post to, may be specified multiple times
     #[clap(short)]
@@ -35,9 +36,14 @@ struct Config {
     /// Save requests to a log folder
     #[clap(short)]
     save_requests: bool,
+
+    /// Throttle notifications for siblings to this many seconds between pings
+    #[clap(short, default_value = "0")]
+    throttle: u32,
 }
 
-#[tokio::main]
+// Current thread scheduler to minimize overhead, and this should really all fit on one anyway
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Report> {
     setup()?;
 
@@ -54,6 +60,9 @@ async fn main() -> Result<(), Report> {
 
     // Buffer to hold plex request queue
     let (tx, mut rx) = tokio::sync::mpsc::channel(1024);
+
+    // Buffer to transfer rate limited messages
+    let (rate_limit_tx, mut rate_limit_rx) = tokio::sync::mpsc::channel(1024);
 
     // Internally this uses an Arc<Mutex<T>>, so cloning directly is cheap and safe
     let discord_client = discord::webhook::WebhookExecutor::new();
@@ -86,7 +95,7 @@ async fn main() -> Result<(), Report> {
     let server_future = warp::serve(api).run(([0, 0, 0, 0], args.port));
 
     // Process received plex messages in one place, to allow combination and filtering of them
-    let messager_future = async move {
+    let messager_future = |args: Config, discord_client: WebhookExecutor| async move {
         // Initialize a message template to clone for all further messages
         let mut default_embed = Embed::default();
         default_embed.author = Some(EmbedAuthor {
@@ -138,14 +147,20 @@ async fn main() -> Result<(), Report> {
                 let mut em = default_embed.clone();
 
                 // Construct a message title from media metadata
-                let mut message_title = String::from("New Media Added");
+                let mut message_title = format!(
+                    "New {} added",
+                    metadata
+                        .media_type
+                        .clone()
+                        .unwrap_or_else(|| "media".to_string())
+                );
                 let mut message_description = String::new();
 
                 // Gracefully fall through, and fill in context based on what kind of content this is
-                if let Some(grandparent_title) = metadata.grandparent_title {
+                if let Some(grandparent_title) = &metadata.grandparent_title {
                     // has grandparent title, is a tv episode with associated season (parent) and show (this)
                     message_title += &format!(": {grandparent_title}");
-                    if let Some(parent_title) = metadata.parent_title {
+                    if let Some(parent_title) = &metadata.parent_title {
                         // Append season context
                         message_title += &format!(" - {parent_title}");
 
@@ -160,15 +175,15 @@ async fn main() -> Result<(), Report> {
                         }
 
                         // Add episode title as description
-                        if let Some(title) = metadata.title {
+                        if let Some(title) = &metadata.title {
                             message_description += &format!(": {title}");
                         }
                     }
-                } else if let Some(parent_title) = metadata.parent_title {
+                } else if let Some(parent_title) = &metadata.parent_title {
                     // no grandparent title, this item refers to a season of a show, or a show without seasons?
                     message_title += &format!(": {parent_title}");
 
-                    if let Some(title) = metadata.title {
+                    if let Some(title) = &metadata.title {
                         // Append season context
                         message_title += &format!(" - {title}");
 
@@ -182,11 +197,12 @@ async fn main() -> Result<(), Report> {
                             message_description += &format!("{index}");
                         }
                     }
-                } else if let Some(title) = metadata.title {
+                } else if let Some(title) = &metadata.title {
                     message_title += &format!(": {title}");
                 } else {
                     error!("Metadata has no title... sending empty message");
                 }
+                // TODO: Find pictures
 
                 // Move into embed object
                 em.title = Some(message_title);
@@ -196,19 +212,36 @@ async fn main() -> Result<(), Report> {
                     Some(message_description)
                 };
 
-                // Add the embed to list to send
-                embeds.push(em);
+                // Build a hash to uniquely ID this item's parents, if any
+                let mut hash = String::new();
+                if let Some(grandparent) = &metadata.grandparent_title {
+                    hash += grandparent;
+                }
+                if let Some(parent) = &metadata.parent_title {
+                    hash += parent;
+                }
 
-                // Wrap the embeds we made in a request object
-                let request = discord::webhook::WebhookRequest::Embeds(embeds);
+                // Time throttle things if configured to, and if this should be throttled
+                if args.throttle > 0 && !hash.is_empty() {
+                    rate_limit_tx.send((hash, em)).await.unwrap();
+                } else {
+                    // Add the embed to list to send
+                    embeds.push(em);
+                }
 
-                // Execute the request against each webhook URL concurrently
-                join_all(
-                    args.webhook_urls
-                        .iter()
-                        .map(|url| request.execute(discord_client.clone(), url)),
-                )
-                .await;
+                // Send something if there is something to send
+                if !embeds.is_empty() {
+                    // Wrap the embeds we made in a request object
+                    let request = discord::webhook::WebhookRequest::Embeds(embeds);
+
+                    // Execute the request against each webhook URL concurrently
+                    join_all(
+                        args.webhook_urls
+                            .iter()
+                            .map(|url| request.execute(discord_client.clone(), url)),
+                    )
+                    .await;
+                }
             } else {
                 error!("Received a library new event without metadata, nothing to notify with");
             }
@@ -216,8 +249,99 @@ async fn main() -> Result<(), Report> {
         }
     };
 
-    info!("Starting up plex webhook handler");
-    join!(messager_future, server_future);
+    // This should be refactored into the above future
+    //TODO: Do th^s
+    let rate_limiter_future = |args: Config, discord_client: WebhookExecutor| async move {
+        // Initialize a hashmap to manage a queue of sorts for rate limiting messages
+        let mut parents_map: HashMap<String, (tokio::time::Instant, Vec<Embed>)> = HashMap::new();
+        let mut oldest_ts = tokio::time::Instant::now();
+
+        let mut pending_requests = Vec::new();
+
+        loop {
+            let now = tokio::time::Instant::now();
+
+            // Schedule a wakeup on oldest_ts
+            let ratelimit_delay =
+                tokio::time::sleep_until(oldest_ts + Duration::from_secs(args.throttle.into()));
+            tokio::pin!(ratelimit_delay);
+
+            // wake up on the sooner of: something comes in on the channel or timer expires
+            tokio::select! {
+                recvd = rate_limit_rx.recv() => {
+                    if let Some((hash, em)) = recvd {
+                        if let Some(val) = parents_map.get_mut(&hash) {
+                            let (ts, embeds) = val;
+                            *ts = now;
+                            embeds.push(em);
+                        } else {
+                            // Initialize the item to just this pending message
+                            parents_map.insert(hash, (now, vec![em]));
+                        }
+                    } else {
+                        // End execution of this future if no senders exist
+                        return;
+                    }
+                },
+                // disable if no pending messages
+                _ = &mut ratelimit_delay, if !parents_map.is_empty()=> {
+                    // Iterate all elements in the map and send ones that are old enough
+                    parents_map = parents_map
+                    .into_iter()
+                    .filter_map(|arg| {
+                        let (key, (ts, ems)) = arg;
+
+                        // Send if old enough
+                        if now.duration_since(ts)
+                            >= std::time::Duration::from_secs(args.throttle.into())
+                        {
+                            // Basically, collapse all existing embeds into one and pop from hashmap
+                            // Stack descriptions up with newlines in between but just copy the first embed for all other fields
+                            let desc = ems.iter().fold(String::new(), |mut d, l| {
+                                d += l.description.as_ref().unwrap();
+                                d += "\n";
+                                d
+                            });
+
+                            let mut whole_embed = ems[0].clone();
+                            whole_embed.description = Some(desc);
+
+                            // Push the request to execute onto a queue of requests
+                            let request = discord::webhook::WebhookRequest::Embeds(vec![whole_embed]);
+                            pending_requests.push(request);
+
+                            // Finally, remove from the hashmap
+                            None
+                        } else {
+                            // Update oldest ts
+                            oldest_ts = now.min(ts);
+                            // else, keep for next pass
+                            Some((key, (ts, ems)))
+                        }
+                    })
+                    .collect();
+                }
+            };
+
+            // Send everything that is ready to send
+            while let Some(req) = pending_requests.pop() {
+                // Execute the request against each webhook URL concurrently
+                join_all(
+                    args.webhook_urls
+                        .iter()
+                        .map(|url| req.execute(discord_client.clone(), url)),
+                )
+                .await;
+            }
+        }
+    };
+
+    info!("Starting up plex webhook relay");
+    join!(
+        messager_future(args.clone(), discord_client.clone()),
+        server_future,
+        rate_limiter_future(args.clone(), discord_client.clone())
+    );
     Ok(())
 }
 
@@ -231,7 +355,7 @@ fn setup() -> Result<(), Report> {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var(
             "RUST_LOG",
-            "plex_discord_webhook=debug,plex_discord_webhook::plex=info,plex_discord_webhook::discord=info",
+            "plex_discord_webhook=info,plex_discord_webhook::plex=info,plex_discord_webhook::discord=info",
         )
     }
     tracing_subscriber::fmt::fmt()
